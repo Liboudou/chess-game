@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chess Game</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>♚ Chess</h1>
+      <div class="turn-indicator">
+        <span id="turn-label">White to move</span>
+        <span class="turn-dot white" id="turn-dot"></span>
+      </div>
+    </div>
+
+    <!-- Game status -->
+    <div class="game-status" id="game-status"></div>
+
+    <!-- Main row: eval bar + board + side panel -->
+    <div class="main-row">
+
+      <!-- Evaluation Bar -->
+      <div class="eval-bar-container" id="eval-bar-container">
+        <span class="eval-label white-label">W</span>
+        <span class="eval-label black-label">B</span>
+        <div class="eval-fill" id="eval-fill" style="height: 50%;"></div>
+        <span class="eval-score" id="eval-score">0.0</span>
+      </div>
+
+      <!-- Board -->
+      <div class="board-container">
+        <div class="board-wrapper">
+          <div id="chess-board"></div>
+
+          <!-- Promotion dialog -->
+          <div class="promotion-overlay" id="promotion-overlay">
+            <div class="promotion-dialog">
+              <div class="promo-title">Promote pawn to:</div>
+              <div class="promo-options" id="promo-options"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Rank labels -->
+        <div class="board-labels rank-labels" id="rank-labels">
+          <span>8</span><span>7</span><span>6</span><span>5</span>
+          <span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+
+        <!-- File labels -->
+        <div class="board-labels file-labels" id="file-labels">
+          <span>a</span><span>b</span><span>c</span><span>d</span>
+          <span>e</span><span>f</span><span>g</span><span>h</span>
+        </div>
+      </div>
+
+      <!-- Side Panel -->
+      <div class="side-panel">
+
+        <!-- Controls -->
+        <div class="panel-card">
+          <h3>Controls</h3>
+          <div class="controls">
+            <button id="btn-new-game" class="primary">New Game</button>
+            <button id="btn-undo">Undo</button>
+          </div>
+        </div>
+
+        <!-- Game Mode -->
+        <div class="panel-card">
+          <h3>Mode</h3>
+          <div class="mode-toggle">
+            <button id="mode-1v1" class="active">1 vs 1</button>
+            <button id="mode-ai">vs AI</button>
+          </div>
+          <div class="ai-thinking" id="ai-thinking">
+            <div class="spinner"></div>
+            <span>AI thinking...</span>
+          </div>
+        </div>
+
+        <!-- AI Difficulty -->
+        <div class="panel-card" id="difficulty-card" style="display:none;">
+          <h3>AI Difficulty</h3>
+          <div class="difficulty-selector">
+            <button data-depth="1">1</button>
+            <button data-depth="2">2</button>
+            <button data-depth="3" class="active">3</button>
+            <button data-depth="4">4</button>
+            <button data-depth="5">5</button>
+          </div>
+        </div>
+
+        <!-- Evaluation Toggle -->
+        <div class="panel-card">
+          <div class="eval-toggle">
+            <input type="checkbox" id="eval-toggle" checked>
+            <label for="eval-toggle">Evaluation bar</label>
+          </div>
+        </div>
+
+        <!-- Move History -->
+        <div class="panel-card">
+          <h3>Moves</h3>
+          <div class="move-history" id="move-history">
+            <span class="move-placeholder" style="color:var(--text-dim);font-size:0.7rem;">Game not started</span>
+          </div>
+        </div>
+
+        <!-- Captured Pieces -->
+        <div class="panel-card">
+          <h3>Captured</h3>
+          <div class="captured-pieces" id="captured-white"></div>
+          <div class="captured-pieces" id="captured-black"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script src="js/chess.js?v=2"></script>
+  <script src="js/evaluation.js?v=2"></script>
+  <script>
+window.__debug = window.__debug || {};
+window.__debug.beforeAI = { Chess: typeof Chess, evaluate: typeof evaluate };
+</script>
+  <script src="js/ai.js?v=2"></script>
+  <script>
+window.__debug.afterAI = { findBestMove: typeof findBestMove, wFBM: typeof window.findBestMove, Chess: typeof Chess, evaluate: typeof evaluate };
+</script>
+  <script src="js/app.js?v=2"></script>
+  <script>
+window.__debug.afterAPP = { squares: document.querySelectorAll('.square').length, Chess: typeof Chess };
+</script>
+</body>
+</html>
