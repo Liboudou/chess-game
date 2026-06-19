@@ -7,8 +7,8 @@
 
 /* ─── Unicode piece symbols ─────────────────────────────────────── */
 const UNICODE_PIECES = {
-  K: '\u2654', Q: '\u2655', R: '\u2656', B: '\u2657', N: '\u2658', P: '\u2659',
-  k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F',
+  K: '\u265A', Q: '\u265B', R: '\u265C', B: '\u265D', N: '\u265E', P: '\u265F',
+  k: '\u2654', q: '\u2655', r: '\u2656', b: '\u2657', n: '\u2658', p: '\u2659',
 };
 
 // PIECE_VALUES for captured piece ordering (centipawn-style).
@@ -314,14 +314,16 @@ function executeMove(move) {
   moveStack.push(undoState);
 
   clearSelection();
-  updateUI();
 
-  // Auto-enter analysis on game over
-  if (game.isGameOver()) {
-    setTimeout(() => enterAnalysisMode(), 300);
-  } else {
-    checkAI();
-  }
+  const afterMove = () => {
+    updateUI();
+    if (game.isGameOver()) {
+      setTimeout(() => enterAnalysisMode(), 300);
+    } else {
+      checkAI();
+    }
+  };
+  animatePieceMove(move.from, move.to, movingPieceChar, afterMove);
 }
 
 function moveToNotation(move, pieceChar) {
@@ -461,8 +463,53 @@ function updateEvalBar() {
     evalFill.style.height = (100 - fillPct) + '%';
   }
 
-  const displayScore = score.toFixed(1);
+  const displayScore = (score / 100).toFixed(1);
   evalScore.textContent = (score > 0 ? '+' : '') + displayScore;
+}
+
+/* ─── Piece slide animation ──────────────────────────────────────── */
+
+function animatePieceMove(from, to, pieceChar, callback) {
+  const boardWrapper = document.querySelector('.board-wrapper');
+  if (!boardWrapper) { callback(); return; }
+
+  const sqSize = boardWrapper.offsetWidth / 8;
+  const fromFile = from.charCodeAt(0) - 97;
+  const fromRank = 8 - parseInt(from[1]);
+  const toFile = to.charCodeAt(0) - 97;
+  const toRank = 8 - parseInt(to[1]);
+
+  const pieceEl = document.createElement('span');
+  pieceEl.className = 'floating-piece';
+  pieceEl.textContent = UNICODE_PIECES[pieceChar] || pieceChar;
+  pieceEl.style.left = (fromFile * sqSize) + 'px';
+  pieceEl.style.top = (fromRank * sqSize) + 'px';
+  pieceEl.style.width = sqSize + 'px';
+  pieceEl.style.height = sqSize + 'px';
+  pieceEl.style.fontSize = (sqSize * 0.8) + 'px';
+  pieceEl.style.display = 'flex';
+  pieceEl.style.alignItems = 'center';
+  pieceEl.style.justifyContent = 'center';
+
+  boardWrapper.appendChild(pieceEl);
+
+  // Trigger reflow, then animate
+  pieceEl.offsetHeight;
+  pieceEl.style.left = (toFile * sqSize) + 'px';
+  pieceEl.style.top = (toRank * sqSize) + 'px';
+
+  pieceEl.addEventListener('transitionend', () => {
+    pieceEl.remove();
+    callback();
+  }, { once: true });
+
+  // Fallback if transitionend doesn't fire
+  setTimeout(() => {
+    if (pieceEl.parentNode) {
+      pieceEl.remove();
+      callback();
+    }
+  }, 400);
 }
 
 /* ─── Status & Info ─────────────────────────────────────────────── */
