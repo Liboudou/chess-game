@@ -1,0 +1,6 @@
+# Secrets / credentials — never commit these
+.git-askpass.sh
+*.token
+*.pem
+.env
+.env.*
