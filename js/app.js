@@ -52,7 +52,6 @@ const moveHistoryEl = document.getElementById('move-history');
 const capturedWhiteEl = document.getElementById('captured-white');
 const capturedBlackEl = document.getElementById('captured-black');
 const evalBarContainer = document.getElementById('eval-bar-container');
-const evalFill = document.getElementById('eval-fill');
 const evalScore = document.getElementById('eval-score');
 const promoOverlay = document.getElementById('promotion-overlay');
 const promoOptions = document.getElementById('promo-options');
@@ -455,17 +454,21 @@ function updateEvalBar() {
   const pct = 50 + (clamped / 20);
   const fillPct = Math.max(0, Math.min(100, pct));
 
-  evalFill.className = 'eval-fill';
-  if (score > 0) {
-    evalFill.classList.add('white-advantage');
-    evalFill.style.height = fillPct + '%';
-  } else {
-    evalFill.classList.add('black-advantage');
-    evalFill.style.height = (100 - fillPct) + '%';
-  }
+  const whiteFill = document.getElementById('eval-fill-white');
+  const blackFill = document.getElementById('eval-fill-black');
+  if (whiteFill) whiteFill.style.height = fillPct + '%';
+  if (blackFill) blackFill.style.height = (100 - fillPct) + '%';
 
   const displayScore = (score / 100).toFixed(1);
   evalScore.textContent = (score > 0 ? '+' : '') + displayScore;
+
+  if (fillPct > 55) {
+    evalScore.style.color = '#1a1a1a';
+  } else if (fillPct < 45) {
+    evalScore.style.color = '#f0f0f0';
+  } else {
+    evalScore.style.color = '#f0f0f0';
+  }
 }
 
 /* ─── Piece slide animation ──────────────────────────────────────── */
