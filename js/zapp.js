@@ -7,15 +7,11 @@
 
 /* ─── Unicode piece symbols ─────────────────────────────────────── */
 const UNICODE_PIECES = {
-  K: '\u265A', Q: '\u265B', R: '\u265C', B: '\u265D', N: '\u265E', P: '\u265F',
+  K: '\u2654', Q: '\u2655', R: '\u2656', B: '\u2657', N: '\u2658', P: '\u2659',
   k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F',
 };
 
-// PIECE_VALUES for captured piece ordering (centipawn-style).
-// evaluation.js also declares const PIECE_VALUES — we use it directly.
-// Note: evaluation.js values are in centipawns (P=100), app.js needs simple 1-9 ordering.
-// We define under a different name to avoid redeclaration conflict.
-const PIECE_VALUE_ORDER = { P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0, p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const PIECE_VALUES = { P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0, p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 /* ─── State ─────────────────────────────────────────────────────── */
 let game = new Chess();
@@ -52,6 +48,7 @@ const moveHistoryEl = document.getElementById('move-history');
 const capturedWhiteEl = document.getElementById('captured-white');
 const capturedBlackEl = document.getElementById('captured-black');
 const evalBarContainer = document.getElementById('eval-bar-container');
+const evalFill = document.getElementById('eval-fill');
 const evalScore = document.getElementById('eval-score');
 const promoOverlay = document.getElementById('promotion-overlay');
 const promoOptions = document.getElementById('promo-options');
@@ -116,7 +113,6 @@ function renderBoard() {
       if (piece !== '.') {
         const pieceEl = document.createElement('span');
         pieceEl.className = 'piece';
-        pieceEl.classList.add(piece === piece.toUpperCase() ? 'piece-white' : 'piece-black');
         pieceEl.textContent = UNICODE_PIECES[piece] || piece;
         sqEl.appendChild(pieceEl);
       }
@@ -282,9 +278,6 @@ function executeMove(move) {
     }
   }
 
-  const fromRCForPiece = game._sqToRC(move.from);
-  const movingPieceChar = game.board[fromRCForPiece.r][fromRCForPiece.c];
-
   const result = game.makeMove(move);
   if (!result) {
     clearSelection();
@@ -297,16 +290,16 @@ function executeMove(move) {
   for (const p of undoState.capturedWhiteDelta) capturedWhite.push(p);
   for (const p of undoState.capturedBlackDelta) capturedBlack.push(p);
 
-  const notation = moveToNotation(result, movingPieceChar);
+  const notation = moveToNotation(result);
   if (game.turn === 'w') {
-    const num = Math.floor(moveCount / 2) + 1;
+    const num = moveCount + 1;
     if (historyEntries.length > 0 && !historyEntries[historyEntries.length - 1].black) {
       historyEntries[historyEntries.length - 1].black = notation;
     } else {
       historyEntries.push({ number: num, white: null, black: notation });
     }
   } else {
-    const num = Math.floor(moveCount / 2) + 1;
+    const num = moveCount + 1;
     historyEntries.push({ number: num, white: notation, black: null });
   }
   moveCount++;
@@ -314,25 +307,25 @@ function executeMove(move) {
   moveStack.push(undoState);
 
   clearSelection();
+  updateUI();
 
-  const afterMove = () => {
-    updateUI();
-    if (game.isGameOver()) {
-      setTimeout(() => enterAnalysisMode(), 300);
-    } else {
-      checkAI();
-    }
-  };
-  animatePieceMove(move.from, move.to, movingPieceChar, afterMove);
+  // Auto-enter analysis on game over
+  if (game.isGameOver()) {
+    setTimeout(() => enterAnalysisMode(), 300);
+  } else {
+    checkAI();
+  }
 }
 
-function moveToNotation(move, pieceChar) {
+function moveToNotation(move) {
   const type = move.promotion ? move.promotion.toUpperCase() : '';
 
   if (move.flags.includes('k')) return 'O-O';
   if (move.flags.includes('q')) return 'O-O-O';
 
-  const pieceType = pieceChar ? pieceChar.toUpperCase() : 'P';
+  const toRC = game._sqToRC(move.to);
+  const pieceOnTarget = game.board[toRC.r][toRC.c];
+  const pieceType = pieceOnTarget !== '.' ? pieceOnTarget.toUpperCase() : 'P';
 
   let n = '';
   if (pieceType !== 'P') n += pieceType;
@@ -373,14 +366,7 @@ function undoMove() {
   }
 
   moveCount--;
-
-  // Fix undo: if the last entry has both white and black, just revert black notation
-  if (historyEntries.length > 0 && historyEntries[historyEntries.length - 1].black !== null) {
-    historyEntries[historyEntries.length - 1].black = null;
-  } else {
-    historyEntries.pop();
-  }
-
+  historyEntries.pop();
   lastMove = state.lastMove;
 
   clearSelection();
@@ -454,59 +440,17 @@ function updateEvalBar() {
   const pct = 50 + (clamped / 20);
   const fillPct = Math.max(0, Math.min(100, pct));
 
-  const whiteFill = document.getElementById('eval-fill-white');
-  if (whiteFill) {
-    whiteFill.style.height = fillPct + '%';
-    whiteFill.style.width = fillPct + '%';
+  evalFill.className = 'eval-fill';
+  if (score > 0) {
+    evalFill.classList.add('white-advantage');
+    evalFill.style.height = fillPct + '%';
+  } else {
+    evalFill.classList.add('black-advantage');
+    evalFill.style.height = (100 - fillPct) + '%';
   }
 
-  const displayScore = (score / 100).toFixed(1);
+  const displayScore = score.toFixed(1);
   evalScore.textContent = (score > 0 ? '+' : '') + displayScore;
-}
-
-/* ─── Piece slide animation ──────────────────────────────────────── */
-
-function animatePieceMove(from, to, pieceChar, callback) {
-  const boardWrapper = document.querySelector('.board-wrapper');
-  if (!boardWrapper) { callback(); return; }
-
-  const sqSize = boardWrapper.offsetWidth / 8;
-  const fromFile = from.charCodeAt(0) - 97;
-  const fromRank = 8 - parseInt(from[1]);
-  const toFile = to.charCodeAt(0) - 97;
-  const toRank = 8 - parseInt(to[1]);
-
-  const pieceEl = document.createElement('span');
-  pieceEl.className = 'floating-piece';
-  pieceEl.textContent = UNICODE_PIECES[pieceChar] || pieceChar;
-  pieceEl.style.left = (fromFile * sqSize) + 'px';
-  pieceEl.style.top = (fromRank * sqSize) + 'px';
-  pieceEl.style.width = sqSize + 'px';
-  pieceEl.style.height = sqSize + 'px';
-  pieceEl.style.fontSize = (sqSize * 0.8) + 'px';
-  pieceEl.style.display = 'flex';
-  pieceEl.style.alignItems = 'center';
-  pieceEl.style.justifyContent = 'center';
-
-  boardWrapper.appendChild(pieceEl);
-
-  // Trigger reflow, then animate
-  pieceEl.offsetHeight;
-  pieceEl.style.left = (toFile * sqSize) + 'px';
-  pieceEl.style.top = (toRank * sqSize) + 'px';
-
-  pieceEl.addEventListener('transitionend', () => {
-    pieceEl.remove();
-    callback();
-  }, { once: true });
-
-  // Fallback if transitionend doesn't fire
-  setTimeout(() => {
-    if (pieceEl.parentNode) {
-      pieceEl.remove();
-      callback();
-    }
-  }, 400);
 }
 
 /* ─── Status & Info ─────────────────────────────────────────────── */
@@ -533,11 +477,6 @@ function updateStatus() {
 
   turnLabel.style.display = game.isGameOver() ? 'none' : '';
   turnDot.style.display = game.isGameOver() ? 'none' : '';
-
-  // Show Analyze button when game is over and not already in analysis mode
-  if (game.isGameOver() && !analysisMode && analysisPanel) {
-    el('btn-analyze').style.display = '';
-  }
 }
 
 /* ─── Move history (clickable in analysis mode) ─────────────────── */
@@ -556,7 +495,7 @@ function updateMoveHistory() {
     html += `<span class="move-number">${entry.number}.</span>`;
     if (entry.white) {
       const isCurrent = analysisMode && (analysisPosition === moveIndex);
-      html += `<span class="move-pair${isCurrent ? ' current' : ''}${entry.black === null ? ' last' : ''}" data-move="${moveIndex}">${entry.white}</span> `;
+      html += `<span class="move-pair${isCurrent ? ' current' : ''}${entry.black === null ? ' last' : ''}" data-move="${moveIndex}">${entry.white}</span>`;
     }
     if (entry.black) {
       const isCurrent = analysisMode && (analysisPosition === moveIndex + 1);
@@ -581,11 +520,11 @@ function updateMoveHistory() {
 /* ─── Captured pieces ───────────────────────────────────────────── */
 
 function updateCaptured() {
-  const capturedWhiteSorted = [...capturedWhite].sort((a, b) => PIECE_VALUE_ORDER[b] - PIECE_VALUE_ORDER[a]);
-  const cwValue = capturedWhiteSorted.reduce((sum, p) => sum + (PIECE_VALUE_ORDER[p] || 0), 0);
+  const capturedWhiteSorted = [...capturedWhite].sort((a, b) => PIECE_VALUES[b] - PIECE_VALUES[a]);
+  const cwValue = capturedWhiteSorted.reduce((sum, p) => sum + (PIECE_VALUES[p] || 0), 0);
 
-  const capturedBlackSorted = [...capturedBlack].sort((a, b) => PIECE_VALUE_ORDER[b] - PIECE_VALUE_ORDER[a]);
-  const cbValue = capturedBlackSorted.reduce((sum, p) => sum + (PIECE_VALUE_ORDER[p] || 0), 0);
+  const capturedBlackSorted = [...capturedBlack].sort((a, b) => PIECE_VALUES[b] - PIECE_VALUES[a]);
+  const cbValue = capturedBlackSorted.reduce((sum, p) => sum + (PIECE_VALUES[p] || 0), 0);
 
   capturedWhiteEl.innerHTML = capturedWhiteSorted.map(p =>
     `<span class="captured">${UNICODE_PIECES[p] || p}</span>`
@@ -603,12 +542,26 @@ function enterAnalysisMode() {
   if (historyEntries.length === 0) return;
 
   // Build analysis history from move stack
+  analysisHistory = [];
+  analysisGame = new Chess(); // fresh game to replay
+  analysisGame.load(game.fen()); // use current fen (after game over)
+
+  // Instead of replaying from start, build history from the move stack
+  // Create a fresh game and replay all moves
+  analysisGame = new Chess();
+  for (let i = 0; i < moveStack.length; i++) {
+    const state = moveStack[i];
+    // Recreate the move from the stack - the last move stored in the state
+    // Actually, we rebuild from the game's history
+  }
+
+  // Simpler approach: store FEN after each move as we play
+  // Rebuild analysisHistory from current game state
   rebuildAnalysisHistory();
 
   if (analysisHistory.length === 0) return;
 
   analysisMode = true;
-  analysisGame = new Chess();
   analysisPosition = analysisHistory.length - 1; // start at last position
   gameOverAtMove = true;
 
@@ -653,12 +606,10 @@ function rebuildAnalysisHistory() {
   if (gameHistory.length > 0) {
     for (const state of gameHistory) {
       if (state.move) {
-        const fromRC = tempGame._sqToRC(state.move.from);
-        const movingPieceChar = tempGame.board[fromRC.r][fromRC.c];
         tempGame.makeMove(state.move);
         const evalScore = evaluate(tempGame);
         const bestMove = findBestMoveSafe(tempGame, aiDepth);
-        const notation = moveToNotationFromGame(tempGame, state.move, movingPieceChar);
+        const notation = moveToNotationFromGame(tempGame, state.move);
         analysisHistory.push({
           fen: tempGame.fen(),
           move: state.move,
@@ -670,8 +621,14 @@ function rebuildAnalysisHistory() {
       }
     }
   } else {
-    // Fallback: just use current position (no replay available)
-    // This can happen if moves were made directly via chess engine API
+    // Fallback: rebuild from stored history entries
+    // Read moves from moveStack
+    const replayGame = new Chess();
+    for (let i = 0; i < moveStack.length; i++) {
+      // We don't have the move object directly in moveStack
+      // So let's use the FEN approach: get the game's history
+    }
+    // If we can't rebuild, just use current game
     analysisHistory.push({
       fen: game.fen(),
       move: null,
@@ -683,14 +640,17 @@ function rebuildAnalysisHistory() {
   }
 }
 
-function moveToNotationFromGame(currentGame, move, pieceChar) {
+function moveToNotationFromGame(currentGame, move) {
   const isCheck = currentGame.isCheck();
   const isCheckmate = currentGame.isCheckmate();
 
   if (move.flags.includes('k')) return isCheckmate ? 'O-O#' : isCheck ? 'O-O+' : 'O-O';
   if (move.flags.includes('q')) return isCheckmate ? 'O-O-O#' : isCheck ? 'O-O-O+' : 'O-O-O';
 
-  const pieceType = pieceChar ? pieceChar.toUpperCase() : 'P';
+  const board = currentGame.board;
+  const toRC = currentGame._sqToRC ? currentGame._sqToRC(move.to) : { r: 0, c: 0 };
+  const pieceOnTarget = board[toRC.r][toRC.c];
+  const pieceType = pieceOnTarget !== '.' ? pieceOnTarget.toUpperCase() : 'P';
 
   let n = '';
   if (pieceType !== 'P') n += pieceType;
@@ -751,8 +711,7 @@ function updateAnalysisStatus(pos) {
   const entry = analysisHistory[pos];
   const totalMoves = analysisHistory.length - 1;
   const moveNum = Math.ceil(pos / 2);
-  // Odd positions (1,3,5) = after white's move, even positions (2,4,6) = after black's move
-  const side = (pos % 2 === 1) ? 'White' : 'Black';
+  const side = (pos % 2 === 0) ? 'White' : 'Black';
 
   // Show current position
   let statusText = '';

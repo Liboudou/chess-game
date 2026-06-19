@@ -16,18 +16,6 @@
         <span id="turn-label">White to move</span>
         <span class="turn-dot white" id="turn-dot"></span>
       </div>
-      <div class="header-controls">
-        <button id="btn-new-game" class="btn primary" title="New Game">⟳ New Game</button>
-        <button id="btn-undo" class="btn" title="Undo">↩ Undo</button>
-        <div class="mode-toggle">
-          <button id="mode-1v1" class="active" title="Play against another player">👤 1v1</button>
-          <button id="mode-ai" title="Play against AI">🤖 AI</button>
-        </div>
-        <div class="ai-thinking" id="ai-thinking">
-          <div class="spinner"></div>
-          <span>Thinking...</span>
-        </div>
-      </div>
     </div>
 
     <!-- Game status -->
@@ -37,15 +25,11 @@
     <div class="main-row">
 
       <!-- Evaluation Bar -->
-      <div class="eval-column">
-        <div class="eval-score-display" id="eval-score-display">
-          <span class="eval-score" id="eval-score">0.0</span>
-        </div>
-        <div class="eval-bar-container" id="eval-bar-container">
-          <div class="eval-fill-white" id="eval-fill-white" style="height:50%;"></div>
-          <span class="eval-label white-label">W</span>
-          <span class="eval-label black-label">B</span>
-        </div>
+      <div class="eval-bar-container" id="eval-bar-container">
+        <span class="eval-label white-label">W</span>
+        <span class="eval-label black-label">B</span>
+        <div class="eval-fill" id="eval-fill" style="height: 50%;"></div>
+        <span class="eval-score" id="eval-score">0.0</span>
       </div>
 
       <!-- Board -->
@@ -80,6 +64,28 @@
 
       <!-- Side Panel -->
       <div class="side-panel">
+
+        <!-- Controls -->
+        <div class="panel-card">
+          <h3>Controls</h3>
+          <div class="controls">
+            <button id="btn-new-game" class="primary">New Game</button>
+            <button id="btn-undo">Undo</button>
+          </div>
+        </div>
+
+        <!-- Game Mode -->
+        <div class="panel-card">
+          <h3>Mode</h3>
+          <div class="mode-toggle">
+            <button id="mode-1v1" class="active">1 vs 1</button>
+            <button id="mode-ai">vs AI</button>
+          </div>
+          <div class="ai-thinking" id="ai-thinking">
+            <div class="spinner"></div>
+            <span>AI thinking...</span>
+          </div>
+        </div>
 
         <!-- AI Difficulty -->
         <div class="panel-card" id="difficulty-card" style="display:none;">
@@ -141,6 +147,6 @@
   <script src="js/chess.js"></script>
   <script src="js/evaluation.js"></script>
   <script src="js/ai.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/zapp.js"></script>
 </body>
 </html>
