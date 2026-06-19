@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Test Script Loading 2</title></head><body>
+<div id="output">Loading...</div>
+<script>
+var output = document.getElementById('output');
+</script>
+<script src="js/chess.js"></script>
+<script src="js/evaluation.js"></script>
+<script src="js/ai.js"></script>
+<script>
+output.textContent = 'before app: Chess=' + typeof Chess + ' eval=' + typeof evaluate + ' ai=' + typeof findBestMove;
+</script>
+<script src="js/app.js"></script>
+<script>
+output.textContent += ' | after app: app=' + typeof app + ' board=' + document.getElementById('chess-board').innerHTML.length;
+</script>
+</body></html>
