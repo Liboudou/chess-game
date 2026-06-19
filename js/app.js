@@ -8,7 +8,7 @@
 /* ─── Unicode piece symbols ─────────────────────────────────────── */
 const UNICODE_PIECES = {
   K: '\u265A', Q: '\u265B', R: '\u265C', B: '\u265D', N: '\u265E', P: '\u265F',
-  k: '\u2654', q: '\u2655', r: '\u2656', b: '\u2657', n: '\u2658', p: '\u2659',
+  k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F',
 };
 
 // PIECE_VALUES for captured piece ordering (centipawn-style).
