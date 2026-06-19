@@ -11,26 +11,37 @@ const UNICODE_PIECES = {
   k: '\u265A', q: '\u265B', r: '\u265C', b: '\u265D', n: '\u265E', p: '\u265F',
 };
 
-const PIECE_VALUES = { P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0, p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+// PIECE_VALUES for captured piece ordering (centipawn-style).
+// evaluation.js also declares const PIECE_VALUES — we use it directly.
+// Note: evaluation.js values are in centipawns (P=100), app.js needs simple 1-9 ordering.
+// We define under a different name to avoid redeclaration conflict.
+const PIECE_VALUE_ORDER = { P: 1, N: 3, B: 3, R: 5, Q: 9, K: 0, p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 /* ─── State ─────────────────────────────────────────────────────── */
 let game = new Chess();
-let selectedSquare = null;       // algebraic square string or null
-let legalMovesForSelected = [];  // move objects
-let gameMode = '1v1';           // '1v1' or 'ai'
+let selectedSquare = null;
+let legalMovesForSelected = [];
+let gameMode = '1v1';
 let aiDepth = 3;
 let aiThinking = false;
 let showEvalBar = true;
-let capturedWhite = [];  // pieces captured FROM white (white lost these)
-let capturedBlack = [];  // pieces captured FROM black (black lost these)
-let moveStack = [];      // history for undo: { capturedWhiteDelta, capturedBlackDelta }
+let capturedWhite = [];
+let capturedBlack = [];
+let moveStack = [];
 let isPromoting = false;
-let pendingPromotion = null; // { from, to }
-let lastMove = null;     // { from, to } for highlighting
-
-// Number of moves made (for move pair numbering)
+let pendingPromotion = null;
+let lastMove = null;
 let moveCount = 0;
-let historyEntries = []; // [{ number, white, black }]
+let historyEntries = [];
+
+/* ─── Analysis mode state ───────────────────────────────────────── */
+let analysisMode = false;
+let analysisPosition = 0;  // index into analysisHistory
+let analysisHistory = [];  // [{ fen, move, notation, eval }]
+let analysisGame = null;   // temporary Chess instance for navigating
+let analysisScore = 0;
+let analysisBestMove = null; // best move arrow for current position
+let gameOverAtMove = false;
 
 /* ─── DOM references ────────────────────────────────────────────── */
 const boardEl = document.getElementById('chess-board');
@@ -48,12 +59,17 @@ const promoOptions = document.getElementById('promo-options');
 const aiThinkingEl = document.getElementById('ai-thinking');
 const rankLabels = document.getElementById('rank-labels');
 const fileLabels = document.getElementById('file-labels');
+const analysisPanel = document.getElementById('analysis-panel');
+const canvasEl = document.getElementById('best-move-canvas');
+
+// Helper: safe DOM ref
+function el(id) { return document.getElementById(id); }
 
 /* ─── Board rendering ───────────────────────────────────────────── */
 
 function renderBoard() {
   boardEl.innerHTML = '';
-  const board = game.board;
+  const board = analysisMode && analysisGame ? analysisGame.board : game.board;
 
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -75,22 +91,25 @@ function renderBoard() {
       }
 
       // Check highlight
-      if (piece.toUpperCase() === 'K' && game.isCheck() &&
-          ((game.turn === 'w' && piece === 'K') || (game.turn === 'b' && piece === 'k'))) {
+      const currentGame = analysisMode && analysisGame ? analysisGame : game;
+      if (piece.toUpperCase() === 'K' && currentGame.isCheck() &&
+          ((currentGame.turn === 'w' && piece === 'K') || (currentGame.turn === 'b' && piece === 'k'))) {
         sqEl.classList.add('check');
       }
 
-      // Legal move indicators
-      const legalMove = legalMovesForSelected.find(m => m.to === sq);
-      if (legalMove) {
-        if (board[r][c] !== '.') {
-          const ring = document.createElement('div');
-          ring.className = 'legal-capture-ring';
-          sqEl.appendChild(ring);
-        } else {
-          const dot = document.createElement('div');
-          dot.className = 'legal-dot';
-          sqEl.appendChild(dot);
+      // Legal move indicators (only when not in analysis mode)
+      if (!analysisMode) {
+        const legalMove = legalMovesForSelected.find(m => m.to === sq);
+        if (legalMove) {
+          if (board[r][c] !== '.') {
+            const ring = document.createElement('div');
+            ring.className = 'legal-capture-ring';
+            sqEl.appendChild(ring);
+          } else {
+            const dot = document.createElement('div');
+            dot.className = 'legal-dot';
+            sqEl.appendChild(dot);
+          }
         }
       }
 
@@ -106,21 +125,100 @@ function renderBoard() {
       boardEl.appendChild(sqEl);
     }
   }
+
+  // Draw best move arrow
+  renderBestMoveArrow();
+}
+
+/* ─── Best move arrow (green arrow like chess.com) ──────────────── */
+
+function renderBestMoveArrow() {
+  const cvs = canvasEl;
+  if (!cvs) return;
+  const boardWrapper = document.querySelector('.board-wrapper');
+  if (!boardWrapper) { cvs.style.display = 'none'; return; }
+
+  const currentGame = analysisMode && analysisGame ? analysisGame : game;
+  if (!analysisMode || !analysisBestMove) {
+    cvs.style.display = 'none';
+    return;
+  }
+
+  cvs.style.display = 'block';
+  const rect = boardWrapper.getBoundingClientRect();
+  cvs.width = rect.width;
+  cvs.height = rect.height;
+
+  const ctx = cvs.getContext('2d');
+  ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+  const sqSize = cvs.width / 8;
+  const fromRC = currentGame._sqToRC ? currentGame._sqToRC(analysisBestMove.from) : { r: 0, c: 0 };
+  const toRC = currentGame._sqToRC ? currentGame._sqToRC(analysisBestMove.to) : { r: 7, c: 7 };
+
+  // Center of from and to squares (y is inverted for canvas)
+  const fromX = fromRC.c * sqSize + sqSize / 2;
+  const fromY = fromRC.r * sqSize + sqSize / 2;
+  const toX = toRC.c * sqSize + sqSize / 2;
+  const toY = toRC.r * sqSize + sqSize / 2;
+
+  const angle = Math.atan2(toY - fromY, toX - fromX);
+  const arrowLen = Math.sqrt((toX - fromX) ** 2 + (toY - fromY) ** 2);
+  // Shorten arrow so it doesn't overlap piece
+  const shorten = sqSize * 0.35;
+  const startX = fromX + Math.cos(angle) * shorten;
+  const startY = fromY + Math.sin(angle) * shorten;
+  const endX = toX - Math.cos(angle) * shorten;
+  const endY = toY - Math.sin(angle) * shorten;
+
+  // Draw arrow line
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.strokeStyle = 'rgba(76, 175, 80, 0.8)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
+
+  // Draw arrowhead
+  const headLen = 14;
+  const headAngle = Math.PI / 6;
+  ctx.beginPath();
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(endX - headLen * Math.cos(angle - headAngle), endY - headLen * Math.sin(angle - headAngle));
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(endX - headLen * Math.cos(angle + headAngle), endY - headLen * Math.sin(angle + headAngle));
+  ctx.strokeStyle = 'rgba(76, 175, 80, 0.85)';
+  ctx.lineWidth = 4;
+  ctx.stroke();
 }
 
 /* ─── Click handling ────────────────────────────────────────────── */
 
-function onSquareClick(sq) {
-  if (game.isGameOver() || aiThinking || isPromoting) return;
-  if (gameMode === 'ai' && game.turn === 'b') return; // AI's turn
+function getPieceAt(sq) {
+  if (analysisMode && analysisGame) {
+    const rc = analysisGame._sqToRC ? analysisGame._sqToRC(sq) : game._sqToRC(sq);
+    const board = analysisGame.board;
+    return board[rc.r] ? board[rc.r][rc.c] : '.';
+  }
+  const rc = game._sqToRC(sq);
+  const board = game.board;
+  return board[rc.r] ? board[rc.r][rc.c] : '.';
+}
 
-  const clickedPiece = game.board[game._sqToRC(sq).r][game._sqToRC(sq).c];
+function onSquareClick(sq) {
+  // In analysis mode, clicking a square is disabled (no moves)
+  if (analysisMode) return;
+
+  if (game.isGameOver() || aiThinking || isPromoting) return;
+  if (gameMode === 'ai' && game.turn === 'b') return;
+
+  const rc = game._sqToRC(sq);
+  const clickedPiece = game.board[rc.r][rc.c];
 
   // If we already have a selected piece and the click is a legal move target
   if (selectedSquare) {
     const move = legalMovesForSelected.find(m => m.to === sq);
     if (move) {
-      // If pawn promotion and move is a promotion (has p/pc flag)
       if (move.flags && (move.flags.includes('p') || move.flags.includes('pc'))) {
         showPromotionDialog(move);
         return;
@@ -130,7 +228,7 @@ function onSquareClick(sq) {
     }
   }
 
-  // Select a piece (if any piece of current turn exists at this square)
+  // Select a piece
   if (clickedPiece !== '.') {
     const pieceColor = clickedPiece === clickedPiece.toUpperCase() ? 'w' : 'b';
     if (pieceColor === game.turn) {
@@ -142,7 +240,6 @@ function onSquareClick(sq) {
     }
   }
 
-  // Click on empty square or enemy piece without a selected piece → deselect
   clearSelection();
   renderBoard();
 }
@@ -155,13 +252,10 @@ function clearSelection() {
 /* ─── Move execution ────────────────────────────────────────────── */
 
 function executeMove(move) {
-  // Track captured piece before making the move
   const toRC = game._sqToRC(move.to);
   const capturedPiece = game.board[toRC.r][toRC.c];
   const isEnPassant = move.flags.includes('e');
-  const isCastle = move.flags.includes('k') || move.flags.includes('q');
 
-  // Save undo state (including lastMove for proper undo highlighting)
   const undoState = {
     capturedWhiteDelta: [],
     capturedBlackDelta: [],
@@ -170,14 +264,12 @@ function executeMove(move) {
 
   if (capturedPiece !== '.') {
     if (capturedPiece === capturedPiece.toUpperCase()) {
-      // White piece captured
       undoState.capturedWhiteDelta.push(capturedPiece);
     } else {
       undoState.capturedBlackDelta.push(capturedPiece);
     }
   }
 
-  // En passant: the captured pawn is on a different square
   if (isEnPassant) {
     const epR = game.turn === 'w' ? toRC.r + 1 : toRC.r - 1;
     const epPiece = game.board[epR][toRC.c];
@@ -190,6 +282,9 @@ function executeMove(move) {
     }
   }
 
+  const fromRCForPiece = game._sqToRC(move.from);
+  const movingPieceChar = game.board[fromRCForPiece.r][fromRCForPiece.c];
+
   const result = game.makeMove(move);
   if (!result) {
     clearSelection();
@@ -197,49 +292,45 @@ function executeMove(move) {
     return;
   }
 
-  // Track the last move
   lastMove = { from: move.from, to: move.to };
 
-  // Update captured pieces
   for (const p of undoState.capturedWhiteDelta) capturedWhite.push(p);
   for (const p of undoState.capturedBlackDelta) capturedBlack.push(p);
 
-  // Track move for history
-  const notation = moveToNotation(result);
+  const notation = moveToNotation(result, movingPieceChar);
   if (game.turn === 'w') {
-    // Black just moved - this is a complete pair
-    const num = moveCount + 1;
+    const num = Math.floor(moveCount / 2) + 1;
     if (historyEntries.length > 0 && !historyEntries[historyEntries.length - 1].black) {
       historyEntries[historyEntries.length - 1].black = notation;
     } else {
       historyEntries.push({ number: num, white: null, black: notation });
     }
   } else {
-    // White just moved
-    const num = moveCount + 1;
+    const num = Math.floor(moveCount / 2) + 1;
     historyEntries.push({ number: num, white: notation, black: null });
   }
   moveCount++;
 
   moveStack.push(undoState);
 
-  // Re-set: the move may have been a castling or promotion, so get the result move
   clearSelection();
   updateUI();
-  checkAI();
+
+  // Auto-enter analysis on game over
+  if (game.isGameOver()) {
+    setTimeout(() => enterAnalysisMode(), 300);
+  } else {
+    checkAI();
+  }
 }
 
-function moveToNotation(move) {
+function moveToNotation(move, pieceChar) {
   const type = move.promotion ? move.promotion.toUpperCase() : '';
 
   if (move.flags.includes('k')) return 'O-O';
   if (move.flags.includes('q')) return 'O-O-O';
 
-  // Determine piece type from the moving piece
-  // In the current state (after makeMove), we look at the target square
-  const toRC = game._sqToRC(move.to);
-  const pieceOnTarget = game.board[toRC.r][toRC.c];
-  const pieceType = pieceOnTarget !== '.' ? pieceOnTarget.toUpperCase() : 'P';
+  const pieceType = pieceChar ? pieceChar.toUpperCase() : 'P';
 
   let n = '';
   if (pieceType !== 'P') n += pieceType;
@@ -249,6 +340,11 @@ function moveToNotation(move) {
   }
   n += move.to;
   if (move.promotion) n += '=' + move.promotion.toUpperCase();
+
+  // Add check/mate symbol
+  if (game.isCheckmate()) n += '#';
+  else if (game.isCheck()) n += '+';
+
   return n;
 }
 
@@ -257,10 +353,14 @@ function moveToNotation(move) {
 function undoMove() {
   if (moveStack.length === 0 || aiThinking) return;
 
+  // Exit analysis mode if active
+  if (analysisMode) {
+    exitAnalysisMode();
+  }
+
   const state = moveStack.pop();
   game.undo();
 
-  // Restore captured pieces
   for (const p of state.capturedWhiteDelta) {
     const idx = capturedWhite.lastIndexOf(p);
     if (idx >= 0) capturedWhite.splice(idx, 1);
@@ -271,9 +371,14 @@ function undoMove() {
   }
 
   moveCount--;
-  historyEntries.pop();
-  // Restore the lastMove from saved undo state: the move we're undoing becomes
-  // the highlight target, and the one before it was saved in state.lastMove.
+
+  // Fix undo: if the last entry has both white and black, just revert black notation
+  if (historyEntries.length > 0 && historyEntries[historyEntries.length - 1].black !== null) {
+    historyEntries[historyEntries.length - 1].black = null;
+  } else {
+    historyEntries.pop();
+  }
+
   lastMove = state.lastMove;
 
   clearSelection();
@@ -296,7 +401,7 @@ function showPromotionDialog(move) {
     btn.addEventListener('click', () => {
       move.promotion = p;
       if (move.flags.includes('pc')) {
-        move.flags = 'pc'; // keep promotion+capture flag
+        move.flags = 'pc';
       } else {
         move.flags = 'p';
       }
@@ -316,13 +421,12 @@ function showPromotionDialog(move) {
 function checkAI() {
   if (gameMode !== 'ai') return;
   if (game.isGameOver()) return;
-  if (game.turn === 'w') return; // White is human
+  if (game.turn === 'w') return;
 
   aiThinking = true;
   aiThinkingEl.classList.add('active');
 
   setTimeout(() => {
-    const boardCopy = game.board.map(row => [...row]);
     const bestMove = findBestMove(game, aiDepth);
 
     if (bestMove) {
@@ -342,10 +446,9 @@ function updateEvalBar() {
   }
   evalBarContainer.classList.remove('hidden');
 
-  const score = evaluate(game);
-  // Clamp score to [-1000, 1000] for display
+  const currentGame = analysisMode && analysisGame ? analysisGame : game;
+  const score = evaluate(currentGame);
   const clamped = Math.max(-1000, Math.min(1000, score));
-  // Map score to fill percentage: 0cp = 50%, +1000cp = 100%, -1000cp = 0%
   const pct = 50 + (clamped / 20);
   const fillPct = Math.max(0, Math.min(100, pct));
 
@@ -358,7 +461,6 @@ function updateEvalBar() {
     evalFill.style.height = (100 - fillPct) + '%';
   }
 
-  // Display score
   const displayScore = score.toFixed(1);
   evalScore.textContent = (score > 0 ? '+' : '') + displayScore;
 }
@@ -385,12 +487,16 @@ function updateStatus() {
     statusEl.className = 'game-status';
   }
 
-  // Update turn indicator visibility
   turnLabel.style.display = game.isGameOver() ? 'none' : '';
   turnDot.style.display = game.isGameOver() ? 'none' : '';
+
+  // Show Analyze button when game is over and not already in analysis mode
+  if (game.isGameOver() && !analysisMode && analysisPanel) {
+    el('btn-analyze').style.display = '';
+  }
 }
 
-/* ─── Move history ──────────────────────────────────────────────── */
+/* ─── Move history (clickable in analysis mode) ─────────────────── */
 
 function updateMoveHistory() {
   if (historyEntries.length === 0) {
@@ -399,29 +505,43 @@ function updateMoveHistory() {
   }
 
   let html = '';
-  for (const entry of historyEntries) {
+  for (let i = 0; i < historyEntries.length; i++) {
+    const entry = historyEntries[i];
+    const moveIndex = i * 2 + 1; // first half-move of this pair
+
     html += `<span class="move-number">${entry.number}.</span>`;
     if (entry.white) {
-      html += `<span class="move-pair${entry.black === null ? ' last' : ''}">${entry.white}</span>`;
+      const isCurrent = analysisMode && (analysisPosition === moveIndex);
+      html += `<span class="move-pair${isCurrent ? ' current' : ''}${entry.black === null ? ' last' : ''}" data-move="${moveIndex}">${entry.white}</span> `;
     }
     if (entry.black) {
-      html += `<span class="move-pair${entry.white === null ? ' last' : ''}">${entry.black}</span> `;
+      const isCurrent = analysisMode && (analysisPosition === moveIndex + 1);
+      html += `<span class="move-pair${isCurrent ? ' current' : ''}${entry.white === null ? ' last' : ''}" data-move="${moveIndex + 1}">${entry.black}</span> `;
     }
   }
   moveHistoryEl.innerHTML = html;
   moveHistoryEl.scrollTop = moveHistoryEl.scrollHeight;
+
+  // Make moves clickable in analysis mode
+  if (analysisMode) {
+    moveHistoryEl.querySelectorAll('[data-move]').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', () => {
+        const pos = parseInt(el.dataset.move, 10);
+        navigateToAnalysisPosition(pos);
+      });
+    });
+  }
 }
 
 /* ─── Captured pieces ───────────────────────────────────────────── */
 
 function updateCaptured() {
-  // Pieces captured from white (white lost these) — shown on white's side
-  const capturedWhiteSorted = [...capturedWhite].sort((a, b) => PIECE_VALUES[b] - PIECE_VALUES[a]);
-  const cwValue = capturedWhiteSorted.reduce((sum, p) => sum + (PIECE_VALUES[p] || 0), 0);
+  const capturedWhiteSorted = [...capturedWhite].sort((a, b) => PIECE_VALUE_ORDER[b] - PIECE_VALUE_ORDER[a]);
+  const cwValue = capturedWhiteSorted.reduce((sum, p) => sum + (PIECE_VALUE_ORDER[p] || 0), 0);
 
-  // Pieces captured from black (black lost these) — shown on black's side
-  const capturedBlackSorted = [...capturedBlack].sort((a, b) => PIECE_VALUES[b] - PIECE_VALUES[a]);
-  const cbValue = capturedBlackSorted.reduce((sum, p) => sum + (PIECE_VALUES[p] || 0), 0);
+  const capturedBlackSorted = [...capturedBlack].sort((a, b) => PIECE_VALUE_ORDER[b] - PIECE_VALUE_ORDER[a]);
+  const cbValue = capturedBlackSorted.reduce((sum, p) => sum + (PIECE_VALUE_ORDER[p] || 0), 0);
 
   capturedWhiteEl.innerHTML = capturedWhiteSorted.map(p =>
     `<span class="captured">${UNICODE_PIECES[p] || p}</span>`
@@ -430,6 +550,222 @@ function updateCaptured() {
   capturedBlackEl.innerHTML = capturedBlackSorted.map(p =>
     `<span class="captured">${UNICODE_PIECES[p] || p}</span>`
   ).join('') + (cbValue > 0 ? `<span class="captured-value">+${cbValue}</span>` : '');
+}
+
+/* ─── Analysis mode ─────────────────────────────────────────────── */
+
+function enterAnalysisMode() {
+  if (!game.isGameOver()) return;
+  if (historyEntries.length === 0) return;
+
+  // Build analysis history from move stack
+  rebuildAnalysisHistory();
+
+  if (analysisHistory.length === 0) return;
+
+  analysisMode = true;
+  analysisGame = new Chess();
+  analysisPosition = analysisHistory.length - 1; // start at last position
+  gameOverAtMove = true;
+
+  // Show analysis panel
+  analysisPanel.style.display = '';
+  el('btn-analyze').style.display = 'none';
+  el('btn-exit-analysis').style.display = '';
+
+  // Disable game mode buttons during analysis
+  el('mode-1v1').disabled = true;
+  el('mode-ai').disabled = true;
+  el('btn-undo').disabled = true;
+
+  // Set lastMove to highlight the last move
+  if (analysisHistory.length > 0) {
+    const lastEntry = analysisHistory[analysisHistory.length - 1];
+    lastMove = lastEntry.moveRef ? { from: lastEntry.moveRef.from, to: lastEntry.moveRef.to } : null;
+  }
+
+  // Navigate to last position
+  navigateToAnalysisPosition(analysisPosition);
+}
+
+function rebuildAnalysisHistory() {
+  // Walk the game's internal _history to build FEN sequence
+  const tempGame = new Chess();
+  const gameHistory = game._history || [];
+
+  analysisHistory = [];
+
+  // Starting position
+  analysisHistory.push({
+    fen: tempGame.fen(),
+    move: null,
+    notation: null,
+    moveRef: null,
+    evalScore: evaluate(tempGame),
+    bestMove: findBestMoveSafe(tempGame, aiDepth),
+  });
+
+  // Replay all moves from the game engine's history
+  if (gameHistory.length > 0) {
+    for (const state of gameHistory) {
+      if (state.move) {
+        const fromRC = tempGame._sqToRC(state.move.from);
+        const movingPieceChar = tempGame.board[fromRC.r][fromRC.c];
+        tempGame.makeMove(state.move);
+        const evalScore = evaluate(tempGame);
+        const bestMove = findBestMoveSafe(tempGame, aiDepth);
+        const notation = moveToNotationFromGame(tempGame, state.move, movingPieceChar);
+        analysisHistory.push({
+          fen: tempGame.fen(),
+          move: state.move,
+          notation: notation,
+          moveRef: { from: state.move.from, to: state.move.to },
+          evalScore: evalScore,
+          bestMove: bestMove,
+        });
+      }
+    }
+  } else {
+    // Fallback: just use current position (no replay available)
+    // This can happen if moves were made directly via chess engine API
+    analysisHistory.push({
+      fen: game.fen(),
+      move: null,
+      notation: null,
+      moveRef: null,
+      evalScore: evaluate(game),
+      bestMove: findBestMoveSafe(game, aiDepth),
+    });
+  }
+}
+
+function moveToNotationFromGame(currentGame, move, pieceChar) {
+  const isCheck = currentGame.isCheck();
+  const isCheckmate = currentGame.isCheckmate();
+
+  if (move.flags.includes('k')) return isCheckmate ? 'O-O#' : isCheck ? 'O-O+' : 'O-O';
+  if (move.flags.includes('q')) return isCheckmate ? 'O-O-O#' : isCheck ? 'O-O-O+' : 'O-O-O';
+
+  const pieceType = pieceChar ? pieceChar.toUpperCase() : 'P';
+
+  let n = '';
+  if (pieceType !== 'P') n += pieceType;
+  if (move.flags.includes('c') || move.flags.includes('e') || move.flags.includes('pc')) {
+    if (pieceType === 'P') n += move.from[0];
+    n += 'x';
+  }
+  n += move.to;
+  if (move.promotion) n += '=' + move.promotion.toUpperCase();
+  if (isCheckmate) n += '#';
+  else if (isCheck) n += '+';
+  return n;
+}
+
+function findBestMoveSafe(gameInstance, depth) {
+  try {
+    if (gameInstance.isGameOver()) return null;
+    return findBestMove(gameInstance, depth);
+  } catch (e) {
+    return null;
+  }
+}
+
+function navigateToAnalysisPosition(pos) {
+  if (!analysisMode || !analysisGame) return;
+  if (pos < 0 || pos >= analysisHistory.length) return;
+
+  analysisPosition = pos;
+  const entry = analysisHistory[pos];
+
+  // Load the FEN into analysisGame
+  try {
+    analysisGame.load(entry.fen);
+  } catch (e) {
+    return;
+  }
+
+  // Update lastMove for highlighting
+  lastMove = entry.moveRef ? { from: entry.moveRef.from, to: entry.moveRef.to } : null;
+
+  // Update analysis values
+  analysisScore = entry.evalScore !== undefined ? entry.evalScore : 0;
+  analysisBestMove = entry.bestMove || null;
+
+  // Update the status for analysis mode
+  updateAnalysisStatus(pos);
+
+  // Update selected state
+  selectedSquare = null;
+  legalMovesForSelected = [];
+
+  renderBoard();
+  updateEvalBar();
+  updateMoveHistory();
+}
+
+function updateAnalysisStatus(pos) {
+  const entry = analysisHistory[pos];
+  const totalMoves = analysisHistory.length - 1;
+  const moveNum = Math.ceil(pos / 2);
+  // Odd positions (1,3,5) = after white's move, even positions (2,4,6) = after black's move
+  const side = (pos % 2 === 1) ? 'White' : 'Black';
+
+  // Show current position
+  let statusText = '';
+  if (pos === 0) {
+    statusText = 'Analysis: Starting position';
+  } else {
+    const notation = entry.notation || '...';
+    statusText = `Analysis: Move ${moveNum} by ${side} — ${notation}`;
+  }
+
+  if (analysisBestMove) {
+    statusText += ` | Best: ${analysisBestMove.from}→${analysisBestMove.to}`;
+  }
+
+  statusEl.textContent = statusText;
+  statusEl.className = 'game-status';
+
+  // Update navigation buttons
+  el('btn-first').disabled = (pos <= 0);
+  el('btn-prev').disabled = (pos <= 0);
+  el('btn-next').disabled = (pos >= totalMoves);
+  el('btn-last').disabled = (pos >= totalMoves);
+}
+
+function exitAnalysisMode() {
+  analysisMode = false;
+  analysisGame = null;
+  analysisHistory = [];
+  analysisPosition = 0;
+  analysisBestMove = null;
+
+  // Hide analysis panel
+  if (analysisPanel) {
+    analysisPanel.style.display = 'none';
+    el('btn-analyze').style.display = '';
+    el('btn-exit-analysis').style.display = 'none';
+  }
+
+  // Re-enable buttons
+  el('mode-1v1').disabled = false;
+  el('mode-ai').disabled = false;
+  el('btn-undo').disabled = false;
+
+  // Restore game state
+  lastMove = moveStack.length > 0 ? moveStack[moveStack.length - 1].lastMove || null : null;
+
+  clearSelection();
+  updateUI();
+  updateStatus();
+}
+
+function navigateAnalysis(delta) {
+  if (!analysisMode) return;
+  const newPos = analysisPosition + delta;
+  if (newPos >= 0 && newPos < analysisHistory.length) {
+    navigateToAnalysisPosition(newPos);
+  }
 }
 
 /* ─── Full UI update ────────────────────────────────────────────── */
@@ -445,6 +781,11 @@ function updateUI() {
 /* ─── New game ───────────────────────────────────────────────────── */
 
 function newGame() {
+  // Exit analysis if active
+  if (analysisMode) {
+    exitAnalysisMode();
+  }
+
   game = new Chess();
   selectedSquare = null;
   legalMovesForSelected = [];
@@ -459,8 +800,28 @@ function newGame() {
   pendingPromotion = null;
   promoOverlay.classList.remove('active');
   aiThinkingEl.classList.remove('active');
+
+  // Reset analysis state
+  analysisMode = false;
+  analysisGame = null;
+  analysisHistory = [];
+  analysisPosition = 0;
+  analysisBestMove = null;
+
+  // Hide analysis panel
+  if (analysisPanel) {
+    analysisPanel.style.display = 'none';
+    el('btn-analyze').style.display = '';
+    el('btn-exit-analysis').style.display = 'none';
+  }
+
   clearSelection();
   updateUI();
+
+  // Re-enable buttons
+  el('mode-1v1').disabled = false;
+  el('mode-ai').disabled = false;
+  el('btn-undo').disabled = false;
 }
 
 /* ─── Mode switching ────────────────────────────────────────────── */
@@ -470,7 +831,7 @@ function setMode(mode) {
   document.querySelectorAll('.mode-toggle button').forEach(btn => {
     btn.classList.toggle('active', btn.id === 'mode-' + mode);
   });
-  document.getElementById('difficulty-card').style.display = mode === 'ai' ? '' : 'none';
+  el('difficulty-card').style.display = mode === 'ai' ? '' : 'none';
 
   if (mode === 'ai' && game.turn === 'b' && !game.isGameOver() && !aiThinking) {
     checkAI();
@@ -484,10 +845,10 @@ function init() {
   newGame();
 
   // Button handlers
-  document.getElementById('btn-new-game').addEventListener('click', newGame);
-  document.getElementById('btn-undo').addEventListener('click', undoMove);
-  document.getElementById('mode-1v1').addEventListener('click', () => setMode('1v1'));
-  document.getElementById('mode-ai').addEventListener('click', () => setMode('ai'));
+  el('btn-new-game').addEventListener('click', newGame);
+  el('btn-undo').addEventListener('click', undoMove);
+  el('mode-1v1').addEventListener('click', () => setMode('1v1'));
+  el('mode-ai').addEventListener('click', () => setMode('ai'));
 
   // Difficulty selector
   document.querySelectorAll('.difficulty-selector button').forEach(btn => {
@@ -499,21 +860,84 @@ function init() {
   });
 
   // Eval bar toggle
-  document.getElementById('eval-toggle').addEventListener('change', (e) => {
+  el('eval-toggle').addEventListener('change', (e) => {
     showEvalBar = e.target.checked;
     updateEvalBar();
   });
 
+  // Analysis navigation buttons
+  el('btn-first').addEventListener('click', () => { if (analysisMode) navigateToAnalysisPosition(0); });
+  el('btn-prev').addEventListener('click', () => navigateAnalysis(-1));
+  el('btn-next').addEventListener('click', () => navigateAnalysis(1));
+  el('btn-last').addEventListener('click', () => { if (analysisMode) navigateToAnalysisPosition(analysisHistory.length - 1); });
+  el('btn-analyze').addEventListener('click', enterAnalysisMode);
+  el('btn-exit-analysis').addEventListener('click', exitAnalysisMode);
+
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'u' || e.key === 'z') {
-      if (!e.ctrlKey && !e.metaKey) undoMove();
+    // Don't interfere with text inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (analysisMode) {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        navigateAnalysis(-1);
+      }
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        navigateAnalysis(1);
+      }
+      if (e.key === 'Home') {
+        e.preventDefault();
+        if (analysisMode) navigateToAnalysisPosition(0);
+      }
+      if (e.key === 'End') {
+        e.preventDefault();
+        if (analysisMode) navigateToAnalysisPosition(analysisHistory.length - 1);
+      }
+      if (e.key === 'Escape') {
+        exitAnalysisMode();
+      }
     }
-    if (e.key === 'n') newGame();
+
+    if (!analysisMode) {
+      if (e.key === 'u' || e.key === 'z') {
+        if (!e.ctrlKey && !e.metaKey) undoMove();
+      }
+      if (e.key === 'n') newGame();
+    }
   });
+
+  // Window resize handler for canvas
+  if (canvasEl) {
+    window.addEventListener('resize', () => {
+      if (analysisMode) renderBoard();
+    });
+  }
+
+  // ResizeObserver for canvas sizing
+  const boardWrapper = document.querySelector('.board-wrapper');
+  if (boardWrapper && canvasEl) {
+    const ro = new ResizeObserver(() => {
+      if (analysisMode) renderBoard();
+    });
+    ro.observe(boardWrapper);
+  }
 
   console.log('Chess UI initialized');
 }
+
+// Export app functions to window for accessibility
+window.app = {
+  init: init,
+  newGame: newGame,
+  renderBoard: renderBoard,
+  updateUI: updateUI,
+  undoMove: undoMove,
+  enterAnalysisMode: enterAnalysisMode,
+  exitAnalysisMode: exitAnalysisMode,
+  navigateAnalysis: navigateAnalysis,
+};
 
 // Start when DOM is ready
 if (document.readyState === 'loading') {

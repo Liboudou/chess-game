@@ -34,8 +34,11 @@
 
       <!-- Board -->
       <div class="board-container">
-        <div class="board-wrapper">
+        <div class="board-wrapper" style="position:relative;">
           <div id="chess-board"></div>
+
+          <!-- Best move arrow canvas overlay -->
+          <canvas id="best-move-canvas" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;display:none;"></canvas>
 
           <!-- Promotion dialog -->
           <div class="promotion-overlay" id="promotion-overlay">
@@ -104,6 +107,24 @@
           </div>
         </div>
 
+        <!-- Post-game Analysis -->
+        <div class="panel-card" id="analysis-panel" style="display:none;">
+          <h3>Analysis</h3>
+          <div class="controls analysis-controls">
+            <button id="btn-first" title="First move">⏮</button>
+            <button id="btn-prev" title="Previous move">◀</button>
+            <button id="btn-next" title="Next move">▶</button>
+            <button id="btn-last" title="Last move">⏭</button>
+          </div>
+          <div class="analysis-buttons" style="margin-top:6px;display:flex;gap:4px;">
+            <button id="btn-analyze" class="primary" style="flex:1;">Analyze</button>
+            <button id="btn-exit-analysis" style="flex:1;">Exit</button>
+          </div>
+          <div class="keyboard-hint" style="font-size:0.6rem;color:var(--text-dim);margin-top:4px;text-align:center;">
+            ← → arrows to navigate
+          </div>
+        </div>
+
         <!-- Move History -->
         <div class="panel-card">
           <h3>Moves</h3>
@@ -123,19 +144,9 @@
     </div>
   </div>
 
-  <script src="js/chess.js?v=2"></script>
-  <script src="js/evaluation.js?v=2"></script>
-  <script>
-window.__debug = window.__debug || {};
-window.__debug.beforeAI = { Chess: typeof Chess, evaluate: typeof evaluate };
-</script>
-  <script src="js/ai.js?v=2"></script>
-  <script>
-window.__debug.afterAI = { findBestMove: typeof findBestMove, wFBM: typeof window.findBestMove, Chess: typeof Chess, evaluate: typeof evaluate };
-</script>
-  <script src="js/app.js?v=2"></script>
-  <script>
-window.__debug.afterAPP = { squares: document.querySelectorAll('.square').length, Chess: typeof Chess };
-</script>
+  <script src="js/chess.js"></script>
+  <script src="js/evaluation.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/app.js"></script>
 </body>
 </html>
