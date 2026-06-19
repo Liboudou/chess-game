@@ -117,6 +117,7 @@ function renderBoard() {
       if (piece !== '.') {
         const pieceEl = document.createElement('span');
         pieceEl.className = 'piece';
+        pieceEl.classList.add(piece === piece.toUpperCase() ? 'piece-white' : 'piece-black');
         pieceEl.textContent = UNICODE_PIECES[piece] || piece;
         sqEl.appendChild(pieceEl);
       }
