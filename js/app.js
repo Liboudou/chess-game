@@ -455,20 +455,13 @@ function updateEvalBar() {
   const fillPct = Math.max(0, Math.min(100, pct));
 
   const whiteFill = document.getElementById('eval-fill-white');
-  const blackFill = document.getElementById('eval-fill-black');
-  if (whiteFill) whiteFill.style.height = fillPct + '%';
-  if (blackFill) blackFill.style.height = (100 - fillPct) + '%';
+  if (whiteFill) {
+    whiteFill.style.height = fillPct + '%';
+    whiteFill.style.width = fillPct + '%';
+  }
 
   const displayScore = (score / 100).toFixed(1);
   evalScore.textContent = (score > 0 ? '+' : '') + displayScore;
-
-  if (fillPct > 55) {
-    evalScore.style.color = '#1a1a1a';
-  } else if (fillPct < 45) {
-    evalScore.style.color = '#f0f0f0';
-  } else {
-    evalScore.style.color = '#f0f0f0';
-  }
 }
 
 /* ─── Piece slide animation ──────────────────────────────────────── */

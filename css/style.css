@@ -120,12 +120,42 @@ body {
   max-width: calc(var(--board-max) + var(--eval-bar-w) + 240px + 28px);
 }
 
+/* ─── Eval Column (desktop: bar + score stacked) ───────────────── */
+.eval-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.eval-score-display {
+  background: rgba(0,0,0,0.45);
+  border-radius: 4px;
+  padding: 2px 8px;
+  text-align: center;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.eval-score-display .eval-score {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #e8e8e8;
+  pointer-events: none;
+}
+
+/* When eval bar is hidden, also hide the score display */
+.eval-column:has(.eval-bar-container.hidden) .eval-score-display {
+  display: none;
+}
+
 /* ─── Evaluation Bar ─────────────────────────────────────────────── */
 
 .eval-bar-container {
   width: var(--eval-bar-w);
   height: var(--board-max);
-  background: #2a2a3e;
+  background: #222;
   border-radius: 6px;
   position: relative;
   overflow: hidden;
@@ -150,19 +180,6 @@ body {
   right: 0;
   background: #f0f0f0;
   transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 6px 6px 0 0;
-  z-index: 1;
-}
-
-/* Black fill — grows from the bottom */
-.eval-fill-black {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: #222;
-  transition: height 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  border-radius: 0 0 6px 6px;
   z-index: 1;
 }
 
@@ -745,21 +762,8 @@ body {
     left: 0;
     right: auto;
     top: 0;
-    width: 50%;
     height: 100% !important;
     transition: width 0.35s ease;
-    border-radius: 4px 0 0 4px;
-  }
-
-  .eval-fill-black {
-    bottom: 0;
-    left: auto;
-    right: 0;
-    top: 0;
-    width: 50%;
-    height: 100% !important;
-    transition: width 0.35s ease;
-    border-radius: 0 4px 4px 0;
   }
 
   .eval-label.white-label { left: 4px; top: 50%; transform: translateY(-50%); }
