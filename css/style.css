@@ -266,6 +266,9 @@ body {
   transform: scale(1.04);
 }
 
+.piece-white { color: #1a1a1a; }
+.piece-black { color: #f0f0f0; }
+
 /* ─── Floating piece (slide animation) ────────────────────────────── */
 
 .floating-piece {
